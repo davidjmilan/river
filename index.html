@@ -50,6 +50,14 @@
         width: 80%;
         height: 70%;
     }
+
+    #loadingText {
+        color: dimgray;
+        font-size: 48px;
+        letter-spacing: 4px;
+        text-align: center;
+        margin-top: 20%;
+    }
 </style>
 </head>
 <body>
@@ -73,7 +81,8 @@
 
 <div id="chartOverlay" onclick="hideGraph()">
     <div id="chartContainer">
-        <canvas id="flowChart"></canvas>
+        <div id="loadingText">LOADING</div>
+        <canvas id="flowChart" style="display:none;"></canvas>
     </div>
 </div>
 
@@ -181,33 +190,52 @@ async function flowGetter(site, start, end) {
 let chart;
 
 async function showGraph(river) {
-    document.getElementById("chartOverlay").style.display = "flex";
+    const overlay = document.getElementById("chartOverlay");
+    const loading = document.getElementById("loadingText");
+    const canvas = document.getElementById("flowChart");
+
+    overlay.style.display = "flex";
+    loading.style.display = "block";
+    canvas.style.display = "none";
+
+    // Destroy old chart immediately so no stale data is visible
+    if (chart) {
+        chart.destroy();
+        chart = null;
+    }
 
     const end = new Date();
     const start = new Date(end.getTime() - 7 * 24 * 60 * 60 * 1000);
-
     const fmt = d => d.toISOString().slice(0, 10);
 
     let data;
 
-    if (river === "Hoosic") {
-        data = await flowGetter("01332500", fmt(start), fmt(end));
-    } else if (river === "Lower Deerfield") {
-        data = await flowGetter("01170000", fmt(start), fmt(end));
-    } else if (river === "Farmington") {
-        const a = await flowGetter("01186000", fmt(start), fmt(end));
-        const b = await flowGetter("01186500", fmt(start), fmt(end));
-        data = {
-            dates: a.dates,
-            flows: a.flows.map((v, i) => v + (b.flows[i] || 0))
-        };
-    } else {
+    try {
+        loading.textContent = "LOADING";
+        if (river === "Hoosic") {
+            data = await flowGetter("01332500", fmt(start), fmt(end));
+        } else if (river === "Lower Deerfield") {
+            data = await flowGetter("01170000", fmt(start), fmt(end));
+        } else if (river === "Farmington") {
+            const a = await flowGetter("01186000", fmt(start), fmt(end));
+            const b = await flowGetter("01186500", fmt(start), fmt(end));
+            data = {
+                dates: a.dates,
+                flows: a.flows.map((v, i) => v + (b.flows[i] || 0))
+            };
+        } else {
+            loading.textContent = "NO DATA";
+            return;
+        }
+    } catch (e) {
+        loading.textContent = "ERROR";
         return;
     }
 
-    if (chart) chart.destroy();
+    loading.style.display = "none";
+    canvas.style.display = "block";
 
-    chart = new Chart(document.getElementById("flowChart"), {
+    chart = new Chart(canvas, {
         type: "line",
         data: {
             labels: data.dates,
