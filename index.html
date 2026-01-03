@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>River Flows</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+<!-- Chart.js -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns"></script>
+
+<style>
+    html, body {
+        margin: 0;
+        padding: 0;
+        background: black;
+        color: dimgray;
+        font-family: "Courier New", monospace;
+        height: 100%;
+    }
+
+    .container {
+        display: grid;
+        grid-template-columns: auto 1fr;
+        gap: 40px;
+        padding: 40px;
+    }
+
+    .river {
+        font-size: 44px;
+        cursor: pointer;
+        user-select: none;
+    }
+
+    .flow {
+        font-size: 44px;
+        text-align: right;
+    }
+
+    #chartOverlay {
+        position: fixed;
+        inset: 0;
+        background: rgba(0,0,0,0.95);
+        display: none;
+        align-items: center;
+        justify-content: center;
+    }
+
+    #chartContainer {
+        width: 80%;
+        height: 70%;
+    }
+</style>
+</head>
+<body>
+
+<div class="container">
+    <div class="river" onclick="showGraph('Hoosic')">Hoosic</div>
+    <div class="flow" id="HoosicFlow">0</div>
+
+    <div class="river" onclick="showGraph('Upper Deerfield')">Upper D</div>
+    <div class="flow" id="UpperDeerfieldFlow">0</div>
+
+    <div class="river" onclick="showGraph('Dryway')">Dryway</div>
+    <div class="flow" id="DrywayFlow">0</div>
+
+    <div class="river" onclick="showGraph('Lower Deerfield')">Lower D</div>
+    <div class="flow" id="LowerDeerfieldFlow">0</div>
+
+    <div class="river" onclick="showGraph('Farmington')">Farmington</div>
+    <div class="flow" id="FarmingtonFlow">0</div>
+</div>
+
+<div id="chartOverlay" onclick="hideGraph()">
+    <div id="chartContainer">
+        <canvas id="flowChart"></canvas>
+    </div>
+</div>
+
+<script>
+/* ================= CONFIG ================= */
+
+// If needed, prepend a CORS proxy here:
+// const PROXY = "https://cors.isomorphic-git.org/";
+const PROXY = "";
+
+/* ================= UTIL ================= */
+
+function isNum(c) {
+    return /[0-9.]/.test(c);
+}
+
+async function fetchText(url) {
+    const res = await fetch(PROXY + url);
+    return res.text();
+}
+
+async function fetchJSON(url) {
+    const res = await fetch(PROXY + url);
+    return res.json();
+}
+
+/* ================= CURRENT FLOWS ================= */
+
+async function USGSgetter(site) {
+    const url =
+        `https://waterservices.usgs.gov/nwis/iv/?sites=${site}&period=P1D&siteStatus=all&format=rdb&parameterCd=00060`;
+    const text = await fetchText(url);
+    const tail = text.slice(-10);
+    const digits = [...tail].filter(isNum).join("");
+    return digits ? Math.floor(parseFloat(digits)) : 0;
+}
+
+async function fife() {
+    const url = "https://api.safewaters.com/api/facility/fife-brook";
+    const data = await fetchJSON(url);
+    return Math.floor(data.data[0].tb_facilityMatrices[0].value);
+}
+
+async function dryway() {
+    const url = "http://www.h2oline.com/srcs/255122.html";
+    const html = await fetchText(url);
+    const idx = html.indexOf("the total flow below the dam was");
+    const snippet = html.slice(idx + 33, idx + 43);
+    return Math.floor(parseFloat([...snippet].filter(isNum).join("")));
+}
+
+async function updateFlows() {
+    try {
+        document.getElementById("HoosicFlow").textContent =
+            await USGSgetter("01332500");
+    } catch {}
+
+    try {
+        document.getElementById("UpperDeerfieldFlow").textContent =
+            await fife();
+    } catch {}
+
+    try {
+        document.getElementById("DrywayFlow").textContent =
+            await dryway();
+    } catch {}
+
+    try {
+        document.getElementById("LowerDeerfieldFlow").textContent =
+            await USGSgetter("01170000");
+    } catch {}
+
+    try {
+        const a = await USGSgetter("01186000");
+        const b = await USGSgetter("01186500");
+        document.getElementById("FarmingtonFlow").textContent = a + b;
+    } catch {}
+}
+
+/* ================= HISTORICAL FLOWS ================= */
+
+async function flowGetter(site, start, end) {
+    const url =
+        `https://waterdata.usgs.gov/nwis/uv?cb_00060=on&format=rdb&site_no=${site}` +
+        `&begin_date=${start}&end_date=${end}`;
+    const text = await fetchText(url);
+
+    const lines = text.split("\n").filter(l => !l.startsWith("#"));
+    const parts = lines.join("").split("USGS").slice(2).join("");
+    const fields = parts.split("\t");
+
+    const dates = [];
+    const flows = [];
+
+    for (let i = 2; i < fields.length; i += 5) {
+        dates.push(new Date(fields[i]));
+        const f = fields[i + 2];
+        flows.push(/[0-9]/.test(f) ? Math.floor(parseFloat(f)) : 0);
+    }
+    return { dates, flows };
+}
+
+/* ================= GRAPH ================= */
+
+let chart;
+
+async function showGraph(river) {
+    document.getElementById("chartOverlay").style.display = "flex";
+
+    const end = new Date();
+    const start = new Date(end.getTime() - 7 * 24 * 60 * 60 * 1000);
+
+    const fmt = d => d.toISOString().slice(0, 10);
+
+    let data;
+
+    if (river === "Hoosic") {
+        data = await flowGetter("01332500", fmt(start), fmt(end));
+    } else if (river === "Lower Deerfield") {
+        data = await flowGetter("01170000", fmt(start), fmt(end));
+    } else if (river === "Farmington") {
+        const a = await flowGetter("01186000", fmt(start), fmt(end));
+        const b = await flowGetter("01186500", fmt(start), fmt(end));
+        data = {
+            dates: a.dates,
+            flows: a.flows.map((v, i) => v + (b.flows[i] || 0))
+        };
+    } else {
+        return;
+    }
+
+    if (chart) chart.destroy();
+
+    chart = new Chart(document.getElementById("flowChart"), {
+        type: "line",
+        data: {
+            labels: data.dates,
+            datasets: [{
+                label: river,
+                data: data.flows,
+                borderColor: "white",
+                borderWidth: 2,
+                pointRadius: 0
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            scales: {
+                x: {
+                    type: "time",
+                    time: { unit: "day" },
+                    ticks: { color: "dimgray" }
+                },
+                y: {
+                    beginAtZero: true,
+                    ticks: { color: "dimgray" }
+                }
+            },
+            plugins: {
+                legend: { display: false }
+            }
+        }
+    });
+}
+
+function hideGraph() {
+    document.getElementById("chartOverlay").style.display = "none";
+}
+
+/* ================= INIT ================= */
+
+updateFlows();
+setInterval(updateFlows, 15 * 60 * 1000);
+</script>
+
+</body>
+</html>
