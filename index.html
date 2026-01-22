@@ -90,7 +90,7 @@
 /* ================= CONFIG ================= */
 
 // If needed, prepend a CORS proxy here:
-// const PROXY = "https://cors.isomorphic-git.org/";
+//const PROXY = "https://corsproxy.io/";
 const PROXY = "";
 
 /* ================= UTIL ================= */
@@ -127,7 +127,7 @@ async function fife() {
 }
 
 async function dryway() {
-    const url = "http://www.h2oline.com/srcs/255122.html";
+    const url = "https://corsproxy.io/http://www.h2oline.com/srcs/255122.html";
     const html = await fetchText(url);
     const idx = html.indexOf("the total flow below the dam was");
     const snippet = html.slice(idx + 33, idx + 43);
